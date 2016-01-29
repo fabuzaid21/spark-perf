@@ -128,6 +128,7 @@ abstract class DecisionTreeTests(sc: SparkContext)
         val colStore = TreeUtil.rowToColumnStoreDense(rdd.map(_.features))
         colStore.persist(StorageLevel.MEMORY_AND_DISK)
         colStore.count()
+        sc.parallelize(0 until 256, 256).foreach(x => System.gc())
         Some(colStore)
       }
       case _ => throw new IllegalArgumentException(s"Got unknown algType: $algType")
@@ -142,6 +143,10 @@ abstract class DecisionTreeTests(sc: SparkContext)
     val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
     val testMetric = validate(model, testRdd)
+    println(s"trainingTime: $trainingTime")
+    println(s"trainingMetric: $trainingMetric")
+    println(s"testTime: $testTime")
+    println(s"testMetric: $testMetric")
     Map("trainingTime" -> trainingTime, "testTime" -> testTime,
       "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
   }
@@ -239,13 +244,15 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
     // Model specification
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
 
-    val (rdd_, categoricalFeaturesInfo_) =
-      DataGenerator.generateDecisionTreeLabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
-        numFeatures, numPartitions, labelType,
-        fracCategoricalFeatures, fracBinaryFeatures, treeDepth, seed)
+    val rdd_ = DataGenerator.generateFriedman1LabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
+      numFeatures, 0.5, numPartitions, seed)
+    // val (rdd_, categoricalFeaturesInfo_) =
+    //   DataGenerator.generateDecisionTreeLabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
+    //     numFeatures, numPartitions, labelType,
+    //     fracCategoricalFeatures, fracBinaryFeatures, treeDepth, seed)
 
     val splits = rdd_.randomSplit(Array(0.8, 0.2), seed)
-    (splits, categoricalFeaturesInfo_, labelType)
+    (splits, categoricalFeaturesInfo, labelType)
   }
 
   // Count dataset transposition time as part of training by default
@@ -278,6 +285,12 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
           val model = transposedDataset match {
             case None => dtRegressor.fit(dataset)
             case Some(tDataset) => dtRegressor.fit(dataset, tDataset)
+          }
+          println(s"Tree depth: ${model.depth}")
+          if (model.numNodes < 200) {
+            println(model.toDebugString) // Print full model.
+          } else {
+            println(model) // Print model summary.
           }
           MLDTRegressionModel(model)
           /*
@@ -317,6 +330,12 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
           val model = transposedDataset match {
             case None => dtClassifier.fit(dataset)
             case Some(tDataset) => dtClassifier.fit(dataset, tDataset)
+          }
+          println(s"Tree depth: ${model.depth}")
+          if (model.numNodes < 200) {
+            println(model.toDebugString) // Print full model.
+          } else {
+            println(model) // Print model summary.
           }
           MLDTClassificationModel(model)
           /*

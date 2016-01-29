@@ -1,21 +1,33 @@
 package mllib.perf.util
 
-import org.apache.spark.ml.attribute.{AttributeGroup, NumericAttribute, NominalAttribute}
-import org.apache.spark.sql.{SQLContext, DataFrame}
-
-import scala.collection.mutable
-
-import org.apache.spark.mllib.linalg.{Vectors, Vector}
+import org.apache.spark.SparkContext
+import org.apache.spark.ml.attribute.{AttributeGroup, NominalAttribute, NumericAttribute}
 import org.apache.spark.mllib.linalg.distributed.RowMatrix
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.random._
 import org.apache.spark.mllib.recommendation.Rating
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.{Algo, FeatureType}
-import org.apache.spark.mllib.tree.model.{Split, DecisionTreeModel, Node, Predict}
+import org.apache.spark.mllib.tree.model.{DecisionTreeModel, Node, Predict, Split}
 import org.apache.spark.rdd.{PairRDDFunctions, RDD}
-import org.apache.spark.SparkContext
+import org.apache.spark.sql.{DataFrame, SQLContext}
+import scala.math.{Pi, pow, sin}
+
+import scala.collection.mutable
 
 object DataGenerator {
+
+  def generateFriedman1LabeledPoints(
+                                      sc: SparkContext,
+                                      numRows: Long,
+                                      numCols: Int,
+                                      noiseSD: Double,
+                                      numPartitions: Int,
+                                      seed: Long = System.currentTimeMillis()
+                                      ): RDD[LabeledPoint] = {
+    RandomRDDs.randomRDD(sc, new Friedman1Generator(numCols - 5, noiseSD, seed),
+      numRows, numPartitions, seed)
+  }
 
   def generateLabeledPoints(
       sc: SparkContext,
@@ -329,7 +341,6 @@ object DataGenerator {
 
     (trainPruned, finalTest)
   }
-
 }
 
 class RatingGenerator(
@@ -442,6 +453,31 @@ class LinearDataGenerator(
 
   override def copy(): LinearDataGenerator =
     new LinearDataGenerator(numFeatures, intercept, seed, labelNoise, problem, sparsity)
+}
+
+class Friedman1Generator(
+                          val numNonsensePredictors: Int,
+                          val noiseSD: Double,
+                          val seed: Long
+                          ) extends RandomDataGenerator[LabeledPoint] {
+
+  private val rng = new java.util.Random(seed)
+
+  override def nextValue(): LabeledPoint = {
+    val features = Array.fill(5 + numNonsensePredictors)(rng.nextDouble)
+    val outcome = 10 * sin(Pi * features(0) * features(1)) +
+      20 * pow(features(2) - 0.5, 2) +
+      10 * features(3) + 5 * features(4) + rng.nextGaussian * noiseSD
+    new LabeledPoint(outcome, Vectors.dense(features))
+  }
+
+  override def copy(): RandomDataGenerator[LabeledPoint] = {
+    new Friedman1Generator(numNonsensePredictors, noiseSD, seed)
+  }
+
+  override def setSeed(seed: Long) = {
+    rng.setSeed(seed)
+  }
 }
 
 
