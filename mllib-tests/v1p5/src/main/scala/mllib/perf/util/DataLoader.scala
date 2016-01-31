@@ -42,7 +42,7 @@ object DataLoader {
         labelStatsB: PartitionLabelStats): PartitionLabelStats = {
       labelStatsA.min = Math.min(labelStatsA.min, labelStatsB.min)
       labelStatsA.max = Math.max(labelStatsA.max, labelStatsB.max)
-      labelStatsA.distinct = Math.max(labelStatsB.distinct, labelStatsB.distinct)
+      labelStatsA.distinct = Math.max(labelStatsA.distinct, labelStatsB.distinct)
       labelStatsA
     }
   }

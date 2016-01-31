@@ -245,7 +245,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
 
     val rdd_ = DataGenerator.generateFriedman1LabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
-      numFeatures, 0.5, numPartitions, seed)
+      numFeatures, 9, numPartitions, seed)
     // val (rdd_, categoricalFeaturesInfo_) =
     //   DataGenerator.generateDecisionTreeLabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
     //     numFeatures, numPartitions, labelType,
