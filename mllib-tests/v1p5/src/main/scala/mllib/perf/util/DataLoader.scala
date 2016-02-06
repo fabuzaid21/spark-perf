@@ -49,6 +49,7 @@ object DataLoader {
 
   /** Infer label type from data */
   private def isClassification(data: RDD[LabeledPoint]): Boolean = {
+    // false
     val labelStats =
       data.mapPartitions(PartitionLabelStats.labelSeqOp)
         .fold(new PartitionLabelStats(Double.MaxValue, Double.MinValue, 0, false))(

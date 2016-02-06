@@ -14,6 +14,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.storage.StorageLevel
+// import org.apache.spark.mllib.util.MLUtils
 
 import mllib.perf.util.{DataGenerator, DataLoader}
 
@@ -125,9 +126,12 @@ abstract class DecisionTreeTests(sc: SparkContext)
     val transposedDataset = algType match {
       case "byRow" => None
       case "byCol" => {
+        val start = System.currentTimeMillis()
         val colStore = TreeUtil.rowToColumnStoreDense(rdd.map(_.features))
         colStore.persist(StorageLevel.MEMORY_AND_DISK)
         colStore.count()
+        val transposeTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+        println(s"transposeTime: $transposeTime")
         sc.parallelize(0 until 256, 256).foreach(x => System.gc())
         Some(colStore)
       }
@@ -244,12 +248,13 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
     // Model specification
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
 
-    val rdd_ = DataGenerator.generateFriedman1LabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
-      numFeatures, 9, numPartitions, seed)
-    // val (rdd_, categoricalFeaturesInfo_) =
-    //   DataGenerator.generateDecisionTreeLabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
-    //     numFeatures, numPartitions, labelType,
-    //     fracCategoricalFeatures, fracBinaryFeatures, treeDepth, seed)
+    // val rdd_ = DataGenerator.generateFriedman1LabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
+    // numFeatures, 0, numPartitions, seed)
+    val (rdd_, categoricalFeaturesInfo_) =
+      DataGenerator.generateDecisionTreeLabeledPoints(sc, math.ceil(numExamples * 1.25).toLong,
+        numFeatures, numPartitions, labelType,
+        fracCategoricalFeatures, fracBinaryFeatures, treeDepth, seed)
+    // MLUtils.saveAsLibSVMFile(rdd_, "hdfs://ec2-54-85-108-155.compute-1.amazonaws.com:9000/temp/yahoo")
 
     val splits = rdd_.randomSplit(Array(0.8, 0.2), seed)
     (splits, categoricalFeaturesInfo, labelType)
