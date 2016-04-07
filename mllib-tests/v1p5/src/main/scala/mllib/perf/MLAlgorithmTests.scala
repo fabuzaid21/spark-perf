@@ -16,6 +16,7 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.storage.StorageLevel
 // import org.apache.spark.mllib.util.MLUtils
 
+import ml.dmlc.xgboost4j.scala.spark.{XGBoost, XGBoostModel}
 import mllib.perf.util.{DataGenerator, DataLoader}
 
 /** Parent class for tests which run on a large dataset. */
@@ -40,12 +41,17 @@ abstract class RegressionAndClassificationTests[M](sc: SparkContext) extends Per
     val trainingTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
     start = System.currentTimeMillis()
-    val trainingMetric = validate(model, rdd)
-    val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+    if (!model.isInstanceOf[XGBoostTreeModel]) {
+      val trainingMetric = validate(model, rdd)
+      val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
-    val testMetric = validate(model, testRdd)
-    Map("trainingTime" -> trainingTime, "testTime" -> testTime,
+      val testMetric = validate(model, testRdd)
+      Map("trainingTime" -> trainingTime, "testTime" -> testTime,
       "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
+    } else {
+      Map("trainingTime" -> trainingTime, "testTime" -> 0.0,
+      "trainingMetric" -> 0.0, "testMetric" -> 0.0)
+    }
   }
 
   /**
@@ -75,6 +81,7 @@ abstract class RegressionAndClassificationTests[M](sc: SparkContext) extends Per
 
 // Decision-tree
 sealed trait TreeBasedModel
+case class XGBoostTreeModel(model: XGBoostModel) extends TreeBasedModel
 case class MLDTRegressionModel(model: DecisionTreeRegressionModel) extends TreeBasedModel
 case class MLDTClassificationModel(model: DecisionTreeClassificationModel) extends TreeBasedModel
 case class MLRFRegressionModel(model: RandomForestRegressionModel) extends TreeBasedModel
@@ -87,6 +94,8 @@ case class MLGBTClassificationModel(model: GBTClassificationModel) extends TreeB
  */
 abstract class DecisionTreeTests(sc: SparkContext)
   extends RegressionAndClassificationTests[TreeBasedModel](sc) {
+
+  val supportedTreeTypes = Array("DecisionTree", "XGBoost") // "RandomForest", "GradientBoostedTrees"
 
   val TEST_DATA_FRACTION =
     ("test-data-fraction",  "fraction of data to hold out for testing (ignored if given training and test dataset)")
@@ -104,10 +113,12 @@ abstract class DecisionTreeTests(sc: SparkContext)
   val FEATURE_SUBSET_STRATEGY =
     ("feature-subset-strategy", "Strategy for feature subset sampling. Supported: auto, all, sqrt, log2, onethird.")
   val ALG_TYPE = ("alg-type", "Algorithm: byRow for original MLlib, byCol for Yggdrasil")
+  val ENSEMBLE_TYPE =
+    ("ensemble-type", "Type of ensemble algorithm: " + supportedTreeTypes.mkString(" "))
 
   intOptions = intOptions ++ Seq(LABEL_TYPE, TREE_DEPTH, MAX_BINS, NUM_TREES)
   doubleOptions = doubleOptions ++ Seq(TEST_DATA_FRACTION, FRAC_CATEGORICAL_FEATURES, FRAC_BINARY_FEATURES)
-  stringOptions = stringOptions ++ Seq(FEATURE_SUBSET_STRATEGY, ALG_TYPE)
+  stringOptions = stringOptions ++ Seq(FEATURE_SUBSET_STRATEGY, ALG_TYPE, ENSEMBLE_TYPE)
 
   addOptionalOptionToParser("training-data", "path to training dataset (if not given, use random data)", "", classOf[String])
   addOptionalOptionToParser("test-data", "path to test dataset (only used if training dataset given)" +
@@ -126,14 +137,19 @@ abstract class DecisionTreeTests(sc: SparkContext)
     val transposedDataset = algType match {
       case "byRow" => None
       case "byCol" => {
-        val start = System.currentTimeMillis()
-        val colStore = TreeUtil.rowToColumnStoreDense(rdd.map(_.features))
-        colStore.persist(StorageLevel.MEMORY_AND_DISK)
-        colStore.count()
-        val transposeTime = (System.currentTimeMillis() - start).toDouble / 1000.0
-        println(s"transposeTime: $transposeTime")
-        sc.parallelize(0 until 256, 256).foreach(x => System.gc())
-        Some(colStore)
+        val ensembleType: String = stringOptionValue(ENSEMBLE_TYPE)
+        if (ensembleType.equals("XGBoost")) {
+          None
+        } else {
+          val start = System.currentTimeMillis()
+          val colStore = TreeUtil.rowToColumnStoreDense(rdd.map(_.features))
+          colStore.persist(StorageLevel.MEMORY_AND_DISK)
+          colStore.count()
+          val transposeTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+          println(s"transposeTime: $transposeTime")
+          sc.parallelize(0 until 256, 256).foreach(x => System.gc())
+          Some(colStore)
+        }
       }
       case _ => throw new IllegalArgumentException(s"Got unknown algType: $algType")
     }
@@ -142,23 +158,33 @@ abstract class DecisionTreeTests(sc: SparkContext)
     val model = runTest(rdd, transposedDataset)
     val trainingTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
-    start = System.currentTimeMillis()
-    val trainingMetric = validate(model, rdd)
-    val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
-
-    val testMetric = validate(model, testRdd)
     println(s"trainingTime: $trainingTime")
-    println(s"trainingMetric: $trainingMetric")
-    println(s"testTime: $testTime")
-    println(s"testMetric: $testMetric")
-    Map("trainingTime" -> trainingTime, "testTime" -> testTime,
-      "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
+    if (!model.isInstanceOf[XGBoostTreeModel]) {
+      start = System.currentTimeMillis()
+      val trainingMetric = validate(model, rdd)
+        val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+
+      val testMetric = validate(model, testRdd)
+        println(s"trainingMetric: $trainingMetric")
+      println(s"testTime: $testTime")
+      println(s"testMetric: $testMetric")
+      Map("trainingTime" -> trainingTime, "testTime" -> testTime,
+        "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
+    } else {
+      Map("trainingTime" -> trainingTime, "testTime" -> 0.0,
+        "trainingMetric" -> 0.0, "testMetric" -> 0.0)
+    }
   }
 
 
   def validate(model: TreeBasedModel, rdd: RDD[LabeledPoint]): Double = {
     val numExamples = rdd.count()
     val predictions: RDD[(Double, Double)] = model match {
+      // case XGBoostTreeModel(rfModel) =>
+      //   val vectorRDD = rdd.map { case LabeledPoint(label, features) =>
+      //       features
+      //   }
+      //   rfModel.predict(vectorRDD)
       case MLDTRegressionModel(rfModel) => makePredictions(rfModel, rdd)
       case MLDTClassificationModel(rfModel) => makePredictions(rfModel, rdd)
       case MLRFRegressionModel(rfModel) => makePredictions(rfModel, rdd)
@@ -189,13 +215,6 @@ abstract class DecisionTreeTests(sc: SparkContext)
 }
 
 class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
-  val supportedTreeTypes = Array("DecisionTree") // "RandomForest", "GradientBoostedTrees"
-
-  val ENSEMBLE_TYPE =
-    ("ensemble-type", "Type of ensemble algorithm: " + supportedTreeTypes.mkString(" "))
-
-  stringOptions = stringOptions ++ Seq(ENSEMBLE_TYPE)
-
   val options = intOptions ++ stringOptions ++ booleanOptions ++ doubleOptions ++ longOptions
   addOptionsToParser()
 
@@ -281,6 +300,16 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
     if (labelType == 0) {
       // Regression
       ensembleType match {
+        case "XGBoost" =>
+          val numRound = 1
+          // training parameters
+          val paramMap = List(
+            "eta" -> 0.1f,
+            "max_depth" -> treeDepth,
+            "objective" -> "reg:linear").toMap
+          // use 16 distributed workers to train the model
+          val model = XGBoost.train(rdd, paramMap, numRound, nWorkers = 16)
+          XGBoostTreeModel(model)
         case "DecisionTree" =>
           val dtRegressor = new DecisionTreeRegressor()
             .setImpurity("variance")
@@ -326,6 +355,19 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
     } else if (labelType >= 2) {
       // Classification
       ensembleType match {
+        case "XGBoost" =>
+          val objective = if (labelType == 2) "binary:logistic"
+                          else "multi:softmax"
+          val numRound = 1
+          // training parameters
+          val paramMap = List(
+            "eta" -> 0.1f,
+            "max_depth" -> treeDepth,
+            "num_class" -> labelType,
+            "objective" -> objective).toMap
+          // use 16 distributed workers to train the model
+          val model = XGBoost.train(rdd, paramMap, numRound, nWorkers = 14)
+          XGBoostTreeModel(model)
         case "DecisionTree" =>
           val dtClassifier = new DecisionTreeClassifier()
             .setImpurity("gini")
