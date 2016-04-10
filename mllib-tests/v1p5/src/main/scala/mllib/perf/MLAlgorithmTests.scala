@@ -1,27 +1,22 @@
 package mllib.perf
 
-import org.json4s.JsonAST._
-import org.json4s.JsonDSL._
-
+import mllib.perf.util.{DataGenerator, DataLoader}
 import org.apache.spark.SparkContext
 import org.apache.spark.ml.PredictionModel
 import org.apache.spark.ml.classification._
 import org.apache.spark.ml.regression._
-import org.apache.spark.ml.tree.impl.TreeUtil
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.storage.StorageLevel
-// import org.apache.spark.mllib.util.MLUtils
-
-import mllib.perf.util.{DataGenerator, DataLoader}
+import org.json4s.JsonAST._
+import org.json4s.JsonDSL._
 
 /** Parent class for tests which run on a large dataset. */
 abstract class RegressionAndClassificationTests[M](sc: SparkContext) extends PerfTest {
 
-  def runTest(rdd: RDD[LabeledPoint]): M
+  def runTest(rdd: DataFrame): M
 
   def validate(model: M, rdd: RDD[LabeledPoint]): Double
 
@@ -33,20 +28,6 @@ abstract class RegressionAndClassificationTests[M](sc: SparkContext) extends Per
 
   var rdd: RDD[LabeledPoint] = _
   var testRdd: RDD[LabeledPoint] = _
-
-  override def run(): JValue = {
-    var start = System.currentTimeMillis()
-    val model = runTest(rdd)
-    val trainingTime = (System.currentTimeMillis() - start).toDouble / 1000.0
-
-    start = System.currentTimeMillis()
-    val trainingMetric = validate(model, rdd)
-    val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
-
-    val testMetric = validate(model, testRdd)
-    Map("trainingTime" -> trainingTime, "testTime" -> testTime,
-      "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
-  }
 
   /**
    * For classification
@@ -118,41 +99,49 @@ abstract class DecisionTreeTests(sc: SparkContext)
   protected var labelType = -1
 
   def runTest(
-    rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel
+    rdd: DataFrame, transposedDataset: Option[(RDD[(Int, Vector)], Array[Double])]): TreeBasedModel
 
   override def run(): JValue = {
     val algType: String = stringOptionValue(ALG_TYPE)
+    val labelType: Int = intOptionValue(LABEL_TYPE)
+    val trainDF = DataGenerator.setMetadata(rdd, categoricalFeaturesInfo, labelType)
     // Transpose dataset before timing "byCol"
+    var transposeTime: Double = 0.0
     val transposedDataset = algType match {
       case "byRow" => None
       case "byCol" => {
         val start = System.currentTimeMillis()
-        val colStore = TreeUtil.rowToColumnStoreDense(rdd.map(_.features))
-        colStore.persist(StorageLevel.MEMORY_AND_DISK)
-        colStore.count()
-        val transposeTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+        val dt = new DecisionTreeRegressor()
+          .setFeaturesCol("features")
+          .setLabelCol("label")
+          .setMaxDepth(10)
+          .setAlgorithm("byCol")
+        val (columns, labels) = dt.transposeDataset(trainDF)
+        columns.persist(StorageLevel.MEMORY_AND_DISK)
+        columns.count()
+        transposeTime = (System.currentTimeMillis() - start).toDouble / 1001.0
         println(s"transposeTime: $transposeTime")
         sc.parallelize(0 until 256, 256).foreach(x => System.gc())
-        Some(colStore)
+        Some((columns, labels))
       }
       case _ => throw new IllegalArgumentException(s"Got unknown algType: $algType")
     }
 
-    var start = System.currentTimeMillis()
-    val model = runTest(rdd, transposedDataset)
-    val trainingTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+    // var start = System.currentTimeMillis()
+    // val model = runTest(trainDF, transposedDataset)
+    // val trainingTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
-    start = System.currentTimeMillis()
-    val trainingMetric = validate(model, rdd)
-    val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
+    // start = System.currentTimeMillis()
+    // val trainingMetric = validate(model, rdd)
+    // val testTime = (System.currentTimeMillis() - start).toDouble / 1000.0
 
-    val testMetric = validate(model, testRdd)
-    println(s"trainingTime: $trainingTime")
-    println(s"trainingMetric: $trainingMetric")
-    println(s"testTime: $testTime")
-    println(s"testMetric: $testMetric")
-    Map("trainingTime" -> trainingTime, "testTime" -> testTime,
-      "trainingMetric" -> trainingMetric, "testMetric" -> testMetric)
+    // val testMetric = validate(model, testRdd)
+    // println(s"trainingTime: $trainingTime")
+    // println(s"trainingMetric: $trainingMetric")
+    // println(s"testTime: $testTime")
+    // println(s"testMetric: $testMetric")
+    Map("trainingTime" -> transposeTime, "testTime" -> transposeTime,
+      "trainingMetric" -> transposeTime, "testMetric" -> transposeTime)
   }
 
 
@@ -255,17 +244,18 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
         numFeatures, numPartitions, labelType,
         fracCategoricalFeatures, fracBinaryFeatures, treeDepth, seed)
     // MLUtils.saveAsLibSVMFile(rdd_, "hdfs://ec2-54-85-108-155.compute-1.amazonaws.com:9000/temp/yahoo")
+    categoricalFeaturesInfo = categoricalFeaturesInfo_
 
     val splits = rdd_.randomSplit(Array(0.8, 0.2), seed)
     (splits, categoricalFeaturesInfo, labelType)
   }
 
   // Count dataset transposition time as part of training by default
-  override def runTest(rdd: RDD[LabeledPoint]): TreeBasedModel = runTest(rdd, None)
+  override def runTest(rdd: DataFrame): TreeBasedModel = runTest(rdd, None)
 
   // Will use precomputed `transposedDataset` if available
   override def runTest(
-      rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel = {
+      dataset: DataFrame, transposedDataset: Option[(RDD[(Int, Vector)], Array[Double])]): TreeBasedModel = {
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
     val maxBins: Int = intOptionValue(MAX_BINS)
     val numTrees: Int = intOptionValue(NUM_TREES)
@@ -277,7 +267,6 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
         s"DecisionTreeTest given unknown ensembleType param: $ensembleType." +
         " Supported values: " + supportedTreeTypes.mkString(" "))
     }
-    val dataset = DataGenerator.setMetadata(rdd, categoricalFeaturesInfo, labelType)
     if (labelType == 0) {
       // Regression
       ensembleType match {
@@ -289,7 +278,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
             .setAlgorithm(algType)
           val model = transposedDataset match {
             case None => dtRegressor.fit(dataset)
-            case Some(tDataset) => dtRegressor.fit(dataset, tDataset)
+            case Some((columns, labels)) => dtRegressor.fit(dataset, columns, labels)
           }
           println(s"Tree depth: ${model.depth}")
           if (model.numNodes < 200) {
@@ -334,7 +323,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
             .setAlgorithm(algType)
           val model = transposedDataset match {
             case None => dtClassifier.fit(dataset)
-            case Some(tDataset) => dtClassifier.fit(dataset, tDataset)
+            case Some((columns, labels)) => dtClassifier.fit(dataset, columns, labels)
           }
           println(s"Tree depth: ${model.depth}")
           if (model.numNodes < 200) {
