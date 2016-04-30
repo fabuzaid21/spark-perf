@@ -8,7 +8,7 @@ import org.apache.spark.ml.PredictionModel
 import org.apache.spark.ml.classification._
 import org.apache.spark.ml.regression._
 import org.apache.spark.ml.tree.impl.TreeUtil
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row
@@ -118,7 +118,7 @@ abstract class DecisionTreeTests(sc: SparkContext)
   protected var labelType = -1
 
   def runTest(
-    rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel
+    rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Array[Double])]]): TreeBasedModel
 
   override def run(): JValue = {
     val algType: String = stringOptionValue(ALG_TYPE)
@@ -265,7 +265,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
 
   // Will use precomputed `transposedDataset` if available
   override def runTest(
-      rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel = {
+      rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Array[Double])]]): TreeBasedModel = {
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
     val maxBins: Int = intOptionValue(MAX_BINS)
     val numTrees: Int = intOptionValue(NUM_TREES)
