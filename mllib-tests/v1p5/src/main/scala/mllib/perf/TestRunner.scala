@@ -37,6 +37,7 @@ object TestRunner {
         test.createInputData(rand.nextLong())
         val res: JValue = test.run()
         System.gc()
+        sc.parallelize(0 until 256, 256).foreach(x => System.gc())
         Thread.sleep(interTrialWait)
         res
       }
