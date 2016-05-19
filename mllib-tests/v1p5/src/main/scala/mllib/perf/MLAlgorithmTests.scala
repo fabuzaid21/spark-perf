@@ -129,7 +129,7 @@ abstract class DecisionTreeTests(sc: SparkContext)
   protected var labelType = -1
 
   def runTest(
-    rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel
+    rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Array[Double])]]): TreeBasedModel
 
   override def run(): JValue = {
     val algType: String = stringOptionValue(ALG_TYPE)
@@ -284,7 +284,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
 
   // Will use precomputed `transposedDataset` if available
   override def runTest(
-      rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Vector)]]): TreeBasedModel = {
+      rdd: RDD[LabeledPoint], transposedDataset: Option[RDD[(Int, Array[Double])]]): TreeBasedModel = {
     val treeDepth: Int = intOptionValue(TREE_DEPTH)
     val maxBins: Int = intOptionValue(MAX_BINS)
     val numTrees: Int = intOptionValue(NUM_TREES)
