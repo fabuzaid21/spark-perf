@@ -6,6 +6,8 @@ import org.json4s.JsonAST._
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods._
 
+import ml.dmlc.xgboost4j.scala.Booster
+
 import org.apache.spark.{SparkConf, SparkContext}
 
 
@@ -19,6 +21,8 @@ object TestRunner {
       val testName = args(0)
       val perfTestArgs = args.slice(1, args.length)
       val sc = new SparkContext(new SparkConf().setAppName("TestRunner: " + testName))
+      sc.registerKryoClasses(Array(classOf[Booster]))
+
 
       // Unfortunate copy of code because there are Perf Tests in both projects and the compiler doesn't like it
       val test: PerfTest = testName match {

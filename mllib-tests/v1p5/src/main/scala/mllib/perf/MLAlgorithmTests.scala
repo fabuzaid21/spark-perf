@@ -308,7 +308,7 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
             "max_depth" -> treeDepth,
             "objective" -> "reg:linear").toMap
           // use 16 distributed workers to train the model
-          val model = XGBoost.train(rdd, paramMap, numRound, nWorkers = 16)
+          val model = XGBoost.train(rdd, paramMap, numRound, nWorkers = 16, useExternalMemory = true)
           XGBoostTreeModel(model)
         case "DecisionTree" =>
           val dtRegressor = new DecisionTreeRegressor()
