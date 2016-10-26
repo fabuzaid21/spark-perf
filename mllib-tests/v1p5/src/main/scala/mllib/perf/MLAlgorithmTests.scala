@@ -16,6 +16,7 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.storage.StorageLevel
 // import org.apache.spark.mllib.util.MLUtils
 
+import org.apache.spark.ml.tree.impl.{YggdrasilRegressor,YggdrasilClassifier}
 import mllib.perf.util.{DataGenerator, DataLoader}
 
 /** Parent class for tests which run on a large dataset. */
@@ -277,19 +278,19 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
         s"DecisionTreeTest given unknown ensembleType param: $ensembleType." +
         " Supported values: " + supportedTreeTypes.mkString(" "))
     }
-    val dataset = DataGenerator.setMetadata(rdd, categoricalFeaturesInfo, labelType)
     if (labelType == 0) {
       // Regression
       ensembleType match {
         case "DecisionTree" =>
-          val dtRegressor = new DecisionTreeRegressor()
+          val dtRegressor = new YggdrasilRegressor()
             .setImpurity("variance")
             .setMaxDepth(treeDepth)
-            .setMaxBins(maxBins)
-            .setAlgorithm(algType)
           val model = transposedDataset match {
-            case None => dtRegressor.fit(dataset)
-            case Some(tDataset) => dtRegressor.fit(dataset, tDataset)
+            case None => {
+              val dataset = DataGenerator.setMetadata(rdd, categoricalFeaturesInfo, labelType)
+              dtRegressor.fit(dataset)
+            }
+            case Some(tDataset) => dtRegressor.train(rdd, tDataset, categoricalFeaturesInfo)
           }
           println(s"Tree depth: ${model.depth}")
           if (model.numNodes < 200) {
@@ -327,14 +328,15 @@ class DecisionTreeTest(sc: SparkContext) extends DecisionTreeTests(sc) {
       // Classification
       ensembleType match {
         case "DecisionTree" =>
-          val dtClassifier = new DecisionTreeClassifier()
+          val dtClassifier = new YggdrasilClassifier()
             .setImpurity("gini")
             .setMaxDepth(treeDepth)
-            .setMaxBins(maxBins)
-            .setAlgorithm(algType)
           val model = transposedDataset match {
-            case None => dtClassifier.fit(dataset)
-            case Some(tDataset) => dtClassifier.fit(dataset, tDataset)
+            case None => {
+              val dataset = DataGenerator.setMetadata(rdd, categoricalFeaturesInfo, labelType)
+              dtClassifier.fit(dataset)
+            }
+            case Some(tDataset) => dtClassifier.train(rdd, tDataset, categoricalFeaturesInfo)
           }
           println(s"Tree depth: ${model.depth}")
           if (model.numNodes < 200) {
